@@ -1,16 +1,25 @@
 ﻿using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
+using Serilog;
 using System;
 using System.IO;
 using System.Text;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using System.Globalization;
+
 class Program
 {
     static string connectionString;
 
     static async Task Main(string[] args)
     {
+        // Ініціалізація Serilog для логування
+        Log.Logger = new LoggerConfiguration()
+            .WriteTo.Console()
+            .WriteTo.File(@"C:\Exports\app.log", rollingInterval: RollingInterval.Day) // Логи записуються в папку C:\Exports\
+            .CreateLogger();
+
         // Завантаження конфігурації з appsettings.json
         var configuration = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
@@ -21,6 +30,7 @@ class Program
 
         if (string.IsNullOrEmpty(connectionString))
         {
+            Log.Error("Не вдалося знайти рядок підключення в конфігураційному файлі.");
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine("Не вдалося знайти рядок підключення в конфігураційному файлі.");
             Console.ResetColor();
@@ -45,6 +55,8 @@ class Program
             Console.WriteLine("8 - Видалити студента");
             Console.WriteLine("9 - Змінити СКБД");
             Console.WriteLine("10 - Експорт даних у CSV");
+            Console.WriteLine("11 - Імпорт даних зі CSV");
+            Console.WriteLine("12 - Очистити всіх студентів");
             Console.WriteLine("exit - Вихід з програми");
             Console.Write("\nВиберіть опцію: ");
             string choice = Console.ReadLine()?.ToLower();
@@ -105,6 +117,12 @@ class Program
                         case "10":
                             await ExportStudentsToCsvAsync(connection);
                             break;
+                        case "11":
+                            await ImportStudentsFromCsvAsync(connection);
+                            break;
+                        case "12":
+                            await ClearAllStudentsAsync(connection);
+                            break;
                         default:
                             Console.ForegroundColor = ConsoleColor.Red;
                             Console.WriteLine("Некоректний вибір. Спробуйте ще раз.");
@@ -115,6 +133,7 @@ class Program
             }
             catch (Exception ex)
             {
+                Log.Error(ex, "Помилка при підключенні до бази даних.");
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"Помилка при підключенні до бази даних: {ex.Message}");
                 Console.ResetColor();
@@ -123,6 +142,9 @@ class Program
             Console.WriteLine("\nНатисніть будь-яку клавішу для продовження...");
             Console.ReadKey();
         }
+
+        // Закриваємо логер в кінці програми
+        Log.CloseAndFlush();
     }
 
     static async Task ShowAllDataAsync(SqlConnection connection)
@@ -134,6 +156,7 @@ class Program
         var reader = await command.ExecuteReaderAsync();
         stopwatch.Stop();
 
+        Log.Information("Показ всіх даних почався.");
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine("\n===== Всі дані =====");
         Console.ResetColor();
@@ -141,6 +164,7 @@ class Program
         {
             Console.WriteLine($"Студент: {reader["full_name"]}, Група: {reader["group_name"]}, Середня оцінка: {reader["avg_grade"]}, Мін. предмет: {reader["min_subject_name"]}, Макс. предмет: {reader["max_subject_name"]}");
         }
+        Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
         Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
     }
 
@@ -154,6 +178,7 @@ class Program
         var reader = await command.ExecuteReaderAsync();
         stopwatch.Stop();
 
+        Log.Information($"Показ студентів з оцінкою більше за {minGrade} почався.");
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine($"\n===== Студенти з оцінкою вище {minGrade} =====");
         Console.ResetColor();
@@ -161,6 +186,7 @@ class Program
         {
             Console.WriteLine($"Студент: {reader["full_name"]}, Середня оцінка: {reader["avg_grade"]}");
         }
+        Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
         Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
     }
 
@@ -173,6 +199,7 @@ class Program
         var reader = await command.ExecuteReaderAsync();
         stopwatch.Stop();
 
+        Log.Information("Показ мінімальних оцінок по предметах почався.");
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine("\n===== Мінімальні оцінки по предметах =====");
         Console.ResetColor();
@@ -180,6 +207,7 @@ class Program
         {
             Console.WriteLine($"Предмет: {reader["subject_name"]}, Мінімальна оцінка: {reader["min_grade"]}");
         }
+        Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
         Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
     }
 
@@ -192,6 +220,7 @@ class Program
         var reader = await command.ExecuteReaderAsync();
         stopwatch.Stop();
 
+        Log.Information("Показ мінімальної та максимальної середньої оцінки почався.");
         if (await reader.ReadAsync())
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
@@ -200,6 +229,7 @@ class Program
             Console.WriteLine($"Мінімальна середня оцінка: {reader["min_avg_grade"]}");
             Console.WriteLine($"Максимальна середня оцінка: {reader["max_avg_grade"]}");
         }
+        Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
         Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
     }
 
@@ -212,46 +242,93 @@ class Program
         var reader = await command.ExecuteReaderAsync();
         stopwatch.Stop();
 
+        Log.Information("Показ кількості студентів по математиці почався.");
         if (await reader.ReadAsync())
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("\n===== Кількість студентів по математиці =====");
+            Console.WriteLine($"\n===== Кількість студентів з оцінками по математиці =====");
             Console.ResetColor();
-            Console.WriteLine($"Студентів з оцінками по математиці: {reader["math_students_count"]}");
+            Console.WriteLine($"Кількість студентів: {reader["math_students_count"]}");
         }
+        Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
         Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
     }
 
     static async Task ShowGroupStatisticsAsync(SqlConnection connection)
     {
-        string query = "SELECT group_name, AVG(avg_grade) AS avg_group_grade FROM StudentsRating GROUP BY group_name;";
+        string query = "SELECT group_name, COUNT(*) AS student_count, AVG(avg_grade) AS avg_grade FROM StudentsRating GROUP BY group_name;";
         var command = new SqlCommand(query, connection);
 
         Stopwatch stopwatch = Stopwatch.StartNew();
         var reader = await command.ExecuteReaderAsync();
         stopwatch.Stop();
 
+        Log.Information("Показ статистики по групах почався.");
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine("\n===== Статистика по групах =====");
         Console.ResetColor();
         while (await reader.ReadAsync())
         {
-            Console.WriteLine($"Група: {reader["group_name"]}, Середня оцінка: {reader["avg_group_grade"]}");
+            Console.WriteLine($"Група: {reader["group_name"]}, Кількість студентів: {reader["student_count"]}, Середня оцінка: {reader["avg_grade"]}");
         }
+        Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
         Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
     }
 
     static async Task UpdateStudentGradeAsync(SqlConnection connection)
     {
-        Console.Write("\nВведіть ім'я студента: ");
-        string studentName = Console.ReadLine();
-        Console.Write("Введіть нову оцінку: ");
-        if (decimal.TryParse(Console.ReadLine(), out decimal newGrade))
+        Console.Write("\nВведіть ID студента для оновлення оцінки: ");
+        if (int.TryParse(Console.ReadLine(), out int studentId))
         {
-            string query = "UPDATE StudentsRating SET avg_grade = @newGrade WHERE full_name = @studentName;";
+            Console.Write("Введіть нову оцінку: ");
+            if (decimal.TryParse(Console.ReadLine(), out decimal newGrade))
+            {
+                string query = "UPDATE StudentGrades SET grade = @newGrade WHERE student_id = @studentId;";
+                var command = new SqlCommand(query, connection);
+                command.Parameters.AddWithValue("@newGrade", newGrade);
+                command.Parameters.AddWithValue("@studentId", studentId);
+
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                int rowsAffected = await command.ExecuteNonQueryAsync();
+                stopwatch.Stop();
+
+                if (rowsAffected > 0)
+                {
+                    Log.Information($"Оцінка студента {studentId} успішно оновлена.");
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"Оцінка студента {studentId} успішно оновлена.");
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("Студент не знайдений або оцінка не була оновлена.");
+                }
+                Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
+                Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("Введена невірна оцінка.");
+                Console.ResetColor();
+            }
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Введено невірне ID студента.");
+            Console.ResetColor();
+        }
+    }
+
+    static async Task DeleteStudentAsync(SqlConnection connection)
+    {
+        Console.Write("\nВведіть ID студента для видалення: ");
+        if (int.TryParse(Console.ReadLine(), out int studentId))
+        {
+            string query = "DELETE FROM StudentsRating WHERE student_id = @studentId;";
             var command = new SqlCommand(query, connection);
-            command.Parameters.AddWithValue("@newGrade", newGrade);
-            command.Parameters.AddWithValue("@studentName", studentName);
+            command.Parameters.AddWithValue("@studentId", studentId);
 
             Stopwatch stopwatch = Stopwatch.StartNew();
             int rowsAffected = await command.ExecuteNonQueryAsync();
@@ -259,50 +336,24 @@ class Program
 
             if (rowsAffected > 0)
             {
+                Log.Information($"Студент з ID {studentId} успішно видалений.");
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"\nОцінка оновлена для студента {studentName}.");
+                Console.WriteLine($"Студент з ID {studentId} успішно видалений.");
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"\nСтудента з ім'ям {studentName} не знайдено.");
+                Console.WriteLine("Студент не знайдений.");
             }
-            Console.ResetColor();
+            Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
             Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
         }
         else
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("Помилка: введено не число.");
+            Console.WriteLine("Введено невірне ID студента.");
             Console.ResetColor();
         }
-    }
-
-    static async Task DeleteStudentAsync(SqlConnection connection)
-    {
-        Console.Write("\nВведіть ім'я студента для видалення: ");
-        string studentName = Console.ReadLine();
-
-        string query = "DELETE FROM StudentsRating WHERE full_name = @studentName;";
-        var command = new SqlCommand(query, connection);
-        command.Parameters.AddWithValue("@studentName", studentName);
-
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        int rowsAffected = await command.ExecuteNonQueryAsync();
-        stopwatch.Stop();
-
-        if (rowsAffected > 0)
-        {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"\nСтудент {studentName} видалений.");
-        }
-        else
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\nСтудента з ім'ям {studentName} не знайдено.");
-        }
-        Console.ResetColor();
-        Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
     }
 
     static async Task ExportStudentsToCsvAsync(SqlConnection connection)
@@ -314,41 +365,152 @@ class Program
         var reader = await command.ExecuteReaderAsync();
         stopwatch.Stop();
 
-        string fileName = Path.Combine("C:\\Exports\\", "students_export.csv");
-        Directory.CreateDirectory("Exports");
-
-        using (var writer = new StreamWriter(fileName, false, Encoding.UTF8))
+        Log.Information("Експорт даних до CSV почався.");
+        using (var writer = new StreamWriter("students.csv"))
         {
-            await writer.WriteLineAsync("Full Name,Group Name,Average Grade,Min Subject,Max Subject");
+            // Запис заголовка CSV
+            await writer.WriteLineAsync("Full Name, Group Name, Average Grade, Min Subject, Max Subject");
+
             while (await reader.ReadAsync())
             {
-                string csvRow = $"{reader["full_name"]},{reader["group_name"]},{reader["avg_grade"]},{reader["min_subject_name"]},{reader["max_subject_name"]}";
-                await writer.WriteLineAsync(csvRow);
+                string line = $"{reader["full_name"]}, {reader["group_name"]}, {reader["avg_grade"]}, {reader["min_subject_name"]}, {reader["max_subject_name"]}";
+                await writer.WriteLineAsync(line);
             }
         }
 
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"\nЕкспорт завершено. Файл збережено за адресою: {fileName}");
-        Console.WriteLine($"Час виконання експорту: {stopwatch.Elapsed.TotalSeconds} секунд.");
-        Console.ResetColor();
+        Log.Information($"Експорт завершено. Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
+        Console.WriteLine("Дані успішно експортовані до файлу students.csv.");
+        Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
     }
 
-    static async Task ChangeDatabaseConnectionStringAsync(IConfiguration configuration)
+    static async Task ImportStudentsFromCsvAsync(SqlConnection connection)
     {
-        Console.WriteLine("Оберіть тип СКБД:");
-        Console.WriteLine("1 - SQL Server");
+        // Вкажіть шлях до вашого CSV файлу
+        string filePath = "C:\\Exports\\students_import.csv";
 
-        string choice = Console.ReadLine();
-
-        if (choice == "1")
+        // Перевірка, чи існує файл
+        if (!File.Exists(filePath))
         {
-            connectionString = configuration.GetConnectionString("DefaultConnection");
-            Console.WriteLine("СКБД змінено на SQL Server.");
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Файл не знайдено. Перевірте шлях до файлу.");
+            Console.ResetColor();
+            return;
+        }
+
+        try
+        {
+            // Читання CSV файлу
+            var lines = File.ReadAllLines(filePath);
+
+            // Перевірка, чи є в файлі дані (перша лінія - заголовки)
+            if (lines.Length <= 1)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("CSV файл порожній або не містить даних.");
+                Console.ResetColor();
+                return;
+            }
+
+            // Ініціалізація команди для вставки даних
+            string query = "INSERT INTO StudentsRating (full_name, group_name, avg_grade, min_subject_name, max_subject_name) " +
+                           "VALUES (@full_name, @group_name, @avg_grade, @min_subject_name, @max_subject_name)";
+
+            using (var command = new SqlCommand(query, connection))
+            {
+                // Убедимся, что подключение открыто перед выполнением запроса
+                if (connection.State != System.Data.ConnectionState.Open)
+                {
+                    await connection.OpenAsync();
+                }
+
+                // Пропускаємо перший рядок (заголовки)
+                foreach (var line in lines.Skip(1))
+                {
+                    var columns = line.Split(',');
+
+                    // Приведення значень до відповідних типів
+                    string fullName = columns[0].Trim();
+                    string groupName = columns[1].Trim();
+                    decimal avgGrade = decimal.Parse(columns[2].Trim()); // Виправлено: не перевіряється на помилки
+                    string minSubjectName = columns[3].Trim();
+                    string maxSubjectName = columns[4].Trim();
+
+                    // Додавання параметрів до запиту
+                    command.Parameters.Clear();
+                    command.Parameters.AddWithValue("@full_name", fullName);
+                    command.Parameters.AddWithValue("@group_name", groupName);
+                    command.Parameters.AddWithValue("@avg_grade", avgGrade);
+                    command.Parameters.AddWithValue("@min_subject_name", minSubjectName);
+                    command.Parameters.AddWithValue("@max_subject_name", maxSubjectName);
+
+                    // Виконання запиту на вставку
+                    await command.ExecuteNonQueryAsync();
+                }
+            }
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Дані успішно імпортовані з CSV.");
+            Console.ResetColor();
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Сталася помилка при імпорті даних: {ex.Message}");
+            Console.ResetColor();
+        }
+        finally
+        {
+            // Закриваємо підключення, якщо воно відкрите
+            if (connection.State == System.Data.ConnectionState.Open)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    static async Task ClearAllStudentsAsync(SqlConnection connection)
+    {
+        string query = "DELETE FROM StudentsRating;";
+        var command = new SqlCommand(query, connection);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        int rowsAffected = await command.ExecuteNonQueryAsync();
+        stopwatch.Stop();
+
+        if (rowsAffected > 0)
+        {
+            Log.Information("Всі студенти успішно видалені.");
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Всі студенти успішно видалені.");
         }
         else
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("Некоректний вибір.");
+            Console.WriteLine("Не вдалося очистити дані.");
+        }
+        Log.Information($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
+        Console.WriteLine($"Час виконання запиту: {stopwatch.Elapsed.TotalSeconds} секунд.");
+    }
+
+    static async Task ChangeDatabaseConnectionStringAsync(IConfiguration configuration)
+    {
+        Console.Write("\nВведіть новий рядок підключення: ");
+        string newConnectionString = Console.ReadLine();
+
+        if (!string.IsNullOrEmpty(newConnectionString))
+        {
+            connectionString = newConnectionString;
+
+            // Оновлюємо connection string у конфігураційному файлі
+            configuration["ConnectionStrings:DefaultConnection"] = newConnectionString;
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Рядок підключення успішно оновлено.");
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Рядок підключення не може бути порожнім.");
             Console.ResetColor();
         }
     }
