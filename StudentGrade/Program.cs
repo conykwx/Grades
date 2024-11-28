@@ -57,11 +57,11 @@ class Program
             Console.WriteLine("10 - Експорт даних у CSV");
             Console.WriteLine("11 - Імпорт даних зі CSV");
             Console.WriteLine("12 - Очистити всіх студентів");
-            Console.WriteLine("exit - Вихід з програми");
+            Console.WriteLine("q - Вихід з програми");
             Console.Write("\nВиберіть опцію: ");
             string choice = Console.ReadLine()?.ToLower();
 
-            if (choice == "exit")
+            if (choice == "q")
             {
                 break;
             }
